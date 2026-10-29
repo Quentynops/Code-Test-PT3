@@ -1,0 +1,214 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GBA Web Player</title>
+
+  <style>
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      padding: 24px 16px;
+      background: #151922;
+      color: white;
+      font-family: Arial, sans-serif;
+      text-align: center;
+    }
+
+    h1 { color: #80e0a0; }
+
+    #game {
+      width: 100%;
+      max-width: 960px;
+      height: 600px;
+      margin: 24px auto;
+      background: black;
+    }
+
+    button, input {
+      margin: 8px;
+      padding: 12px;
+      max-width: 100%;
+    }
+
+    button {
+      border: 0;
+      border-radius: 6px;
+      background: #80e0a0;
+      color: #151922;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    #status {
+      min-height: 24px;
+      color: #c5d5e8;
+    }
+  </style>
+</head>
+<body>
+  <h1>GBA Web Player</h1>
+  <p>Select a Game Boy Advance ROM file from your device.</p>
+
+  <input id="rom" type="file" accept=".gba,.zip">
+  <button id="start">Load Game</button>
+
+  <div>
+    <button id="save" disabled>Save Game</button>
+    <button id="loadSave" disabled>Load Saved Game</button>
+    <input id="saveFile" type="file" accept=".state">
+  </div>
+
+  <p id="status" role="status">Choose a game to begin.</p>
+  <div id="game"></div>
+
+  <script>
+    const startButton = document.getElementById("start");
+    const saveButton = document.getElementById("save");
+    const loadButton = document.getElementById("loadSave");
+    const romInput = document.getElementById("rom");
+    const saveInput = document.getElementById("saveFile");
+    const status = document.getElementById("status");
+
+    let emulatorStarted = false;
+    let saveReady = false;
+    let pendingState = null;
+    let gameUrl = null;
+
+    function setStatus(message) {
+      status.textContent = message;
+    }
+
+    startButton.addEventListener("click", () => {
+      const file = romInput.files[0];
+
+      if (!file) {
+        alert("Please select a game file first.");
+        return;
+      }
+
+      if (emulatorStarted) {
+        setStatus("Refresh the page to load a different game.");
+        return;
+      }
+
+      emulatorStarted = true;
+      startButton.disabled = true;
+
+      gameUrl = URL.createObjectURL(file);
+
+      window.EJS_player = "#game";
+      window.EJS_core = "mgba";
+      window.EJS_gameName = file.name.replace(/\.[^.]+$/, "");
+      window.EJS_gameUrl = gameUrl;
+      window.EJS_gameID = 1;
+      window.EJS_pathtodata =
+        "https://cdn.emulatorjs.org/stable/data/";
+      window.EJS_startOnLoaded = true;
+
+      // Receive a save state when the emulator's
+      // built-in Save State command is used.
+      window.EJS_onSaveState = function (data) {
+        const state = Array.isArray(data) ? data[1] : null;
+
+        if (!state) {
+          setStatus(
+            "No save state was returned. Try the emulator's save-state menu."
+          );
+          return;
+        }
+
+        pendingState = state;
+        saveReady = true;
+        saveButton.disabled = false;
+        setStatus("Save state captured. Click Save Game to download it.");
+      };
+
+      window.EJS_ready = function () {
+        saveButton.disabled = false;
+        loadButton.disabled = false;
+        setStatus(
+          "Game loaded. Use the emulator menu to create a save state."
+        );
+      };
+
+      const script = document.createElement("script");
+      script.src = window.EJS_pathtodata + "loader.js";
+
+      script.onerror = () => {
+        setStatus("Emulator failed to load. Check your connection or CDN access.");
+        emulatorStarted = false;
+        startButton.disabled = false;
+        if (gameUrl) URL.revokeObjectURL(gameUrl);
+        gameUrl = null;
+      };
+
+      document.body.appendChild(script);
+    });
+
+    saveButton.addEventListener("click", () => {
+      if (!saveReady || !pendingState) {
+        setStatus(
+          "Open the emulator menu and use Save State first, then try again."
+        );
+        return;
+      }
+
+      let blob;
+
+      if (pendingState instanceof Blob) {
+        blob = pendingState;
+      } else if (pendingState instanceof ArrayBuffer) {
+        blob = new Blob([pendingState], {
+          type: "application/octet-stream"
+        });
+      } else if (ArrayBuffer.isView(pendingState)) {
+        blob = new Blob([pendingState], {
+          type: "application/octet-stream"
+        });
+      } else {
+        setStatus(
+          "Unsupported save format. Use the emulator's built-in Save State button to download a state."
+        );
+        return;
+      }
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "gba-save.state";
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+      setStatus("Save file download requested.");
+    });
+
+    loadButton.addEventListener("click", () => {
+      const file = saveInput.files[0];
+
+      if (!file) {
+        setStatus("Choose a previously downloaded .state file first.");
+        return;
+      }
+
+      // Load the state on the next emulator startup.
+      // For a running emulator, use its built-in Load State menu.
+      setStatus(
+        "For the running game, use EmulatorJS's Load State menu and select your saved state."
+      );
+    });
+
+    window.addEventListener("beforeunload", () => {
+      if (gameUrl) URL.revokeObjectURL(gameUrl);
+    });
+  </script>
+</body>
+</html>
